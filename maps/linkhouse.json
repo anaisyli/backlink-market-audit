@@ -1,0 +1,13 @@
+{"fields": {
+  "domain": "domain",
+  "segment": "src_cat_name",
+  "price": "lowest_price",
+  "dr": "DR",
+  "da": "DA",
+  "traffic": ["gsc", "ahrefs_traf", "semrush", "semstorm"],
+  "language": "lang",
+  "country": "country",
+  "verified": "verified",
+  "dofollow": "dofollow",
+  "spam": "spam"
+}}
