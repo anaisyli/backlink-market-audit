@@ -122,6 +122,40 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("缺 `dr.med`", r.stderr)
 
+    def test_nested_dot_path_map(self):
+        sites = os.path.join(self.d, "nested.jsonl")
+        mp = os.path.join(self.d, "nested_map.json")
+        out = os.path.join(self.d, "nested_p.json")
+        rows = [
+            {"domain": "x.com", "cat": {"name": "Tech"}, "minPrice": {"amount": 90},
+             "channel": {"metrics": {"domainRating": 48, "organicTraffic": 15000}},
+             "products": [{"dofollow": True}]},
+            {"domain": "y.com", "cat": {"name": "Tech"}, "minPrice": {"amount": 150},
+             "channel": {"metrics": {"domainRating": 62, "organicTraffic": 30000}},
+             "products": [{"dofollow": False}]},
+        ]
+        with open(sites, "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        with open(mp, "w", encoding="utf-8") as f:
+            json.dump({"fields": {
+                "domain": "domain",
+                "segment": "cat.name",
+                "price": "minPrice.amount",
+                "dr": "channel.metrics.domainRating",
+                "traffic": ["channel.metrics.organicTraffic"],
+                "dofollow": "products.0.dofollow",
+            }}, f)
+        r = run_py("analyze.py", sites, "--map", mp, "-o", out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(out, encoding="utf-8") as f:
+            p = json.load(f)
+        self.assertEqual(p["overall"]["price"]["med"], 120.0)
+        self.assertEqual(p["overall"]["dr"]["med"], 55.0)
+        self.assertEqual(p["overall"]["traffic"]["med"], 22500)
+        self.assertEqual(p["overall"]["dofollow_share"], 50.0)
+        self.assertEqual(p["segments"][0]["name"], "Tech")
+
 
 if __name__ == "__main__":
     unittest.main()

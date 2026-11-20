@@ -134,15 +134,55 @@ def load_rows(path):
         raise SystemExit("只支持 .jsonl / .ndjson / .json / .csv")
 
 
-def build_map(row_keys, user_map):
-    """确定每个标准字段实际用哪个键；返回 (map, 警告列表)。"""
+def get_path(obj, path):
+    """读取顶层键或点号嵌套路径（如 channel.metrics.domainRating、products.0.price）。"""
+    if isinstance(obj, dict) and path in obj:
+        return obj[path]
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return None
+    return cur
+
+
+def path_exists(rows, path):
+    for r in rows:
+        if isinstance(r, dict) and path in r:
+            return True
+        cur = r
+        ok = True
+        for part in path.split("."):
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
+            elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+                cur = cur[int(part)]
+            else:
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
+def build_map(row_keys, user_map, sample_rows=()):
+    """确定每个标准字段实际用哪个键（支持点号嵌套路径）；返回 (map, 警告列表)。"""
     m, warns = {}, []
     lower = {k.lower(): k for k in row_keys}
     for std, val in (user_map or {}).items():
         cands = val if isinstance(val, list) else [val]
-        hit = [lower.get(str(c).lower()) for c in cands]
-        hit = [h for h in hit if h]
-        missing = [c for c in cands if str(c).lower() not in lower]
+        hit, missing = [], []
+        for c in cands:
+            cs = str(c)
+            if cs.lower() in lower:
+                hit.append(lower[cs.lower()])
+            elif "." in cs and path_exists(sample_rows, cs):
+                hit.append(cs)
+            else:
+                missing.append(c)
         if missing:
             warns.append(f"--map 中 {std} 指定的字段 {missing} 在数据里不存在")
         if hit:
@@ -199,7 +239,7 @@ def main():
         with open(args.map_path, encoding="utf-8-sig") as f:
             raw_map = json.load(f)
         user_map = raw_map.get("fields", raw_map)
-    m, map_warns = build_map(row_keys, user_map)
+    m, map_warns = build_map(row_keys, user_map, rows[:500])
     for w in map_warns:
         print(f"[warn] {w}", file=sys.stderr)
     missing = [k for k in ("domain", "price", "dr", "segment") if k not in m]
@@ -215,10 +255,10 @@ def main():
 
     def pick(r, std):
         k = m.get(std)
-        return r.get(k) if isinstance(k, str) else None
+        return get_path(r, k) if isinstance(k, str) else None
 
     def traffic_of(r):
-        vals = [num(r.get(k)) for k in traffic_keys]
+        vals = [num(get_path(r, k)) for k in traffic_keys]
         vals = [v for v in vals if v is not None and v > 0]  # 0 视同缺失
         return max(vals) if vals else None
 

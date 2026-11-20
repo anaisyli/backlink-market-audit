@@ -136,6 +136,7 @@
 
 规则：
 
+- 支持点号嵌套路径（含数组下标），如 `"dr": "channel.metrics.domainRating"`、`"price": "minPrice.amount"`、`"dofollow": "products.0.dofollow"`，无需单独写脚本拍平嵌套 JSON。
 - `traffic` 可以是数组，脚本取**多源最大值**（一个站有多个流量源时，取最大的那个最接近真实自然流量）。
 - `price` 要选**站点最低可购价**那一列（`lowest_price` / `price_min` / offer 列表里的最小值），不要用某一种投放形式的价格，否则跟别家不可比。
 - `segment` 选**名字**字段（`src_cat_name`）而不是 ID，省掉一次 ID→名字的映射；只有 ID 时用 `--counts` 把名字带进来。
