@@ -16,6 +16,17 @@
 判断方法：`node scripts/probe.mjs --url <市场页> --attach 9222`（或先关掉登录窗口再传 `--profile <已登录目录>`），看输出的候选接口。
 有列表接口 → A；有数字型接口 → B；都没有但页面能看到列表 → C。
 
+**附加属性：检索额度（会直接掐死采集计划）**
+
+A/B 型平台也可能把「检索」当计费资源——免费或未开户账号只有几次到一百次目录检索，用完后目录整页变
+「Search limit reached」，API 对目录接口一律 `403 Access Denied.`（`/api/thematics` 这类元数据接口通常还活着）。
+
+**这不是封号，也不会随时间自动恢复**：实测响应头 `remaining` 一直是满值、`reset` 为负，说明限流窗口早过期，
+真正卡住的是账号角色（Getfluence 为 `ROLE_PERMISSION_CATALOG_SEARCH_LIMITED`）→ 要充值 / 完成开户 / 下首单才解除。
+
+识别信号（开工 5 分钟内查完）：① 目录接口响应头带 `ratelimit-limit` / `x-ratelimit-remaining`；
+② 页面出现 "Search limit reached" / "search credit"；③ 账号 `state` 为 `uncompleted`、`tags` 含 `advertiser_onboarding`。
+
 **登录是前置条件**。绝大多数平台的市场页要登录才有数据，先按 SKILL.md 第 1 步起一个带调试端口的专用 Chrome，让人工完成登录。
 
 ---
@@ -107,6 +118,56 @@ SiteSearch[keyword]
 
 **该平台画像**：展示 150k+，已核验 103,922，英语 52,286，已核验+英语 48,404；
 ≤$50 占 54.0%，DR 中位 18。低预算段比 Linkhouse 强得多（≤$50 且 DR≥30：Adsy 17.3% vs LH 4.4%）。
+
+---
+
+## Getfluence（已验证，2026-11；**有检索额度，额度用完即封目录**）
+
+**入口**：`www.getfluence.com` 是 Webflow 宣传站，真市场在 **`app.getfluence.com`**（React SPA，`/en-GB/catalog/<thematic>`）。
+
+**登录**：`/en-GB/login`，邮箱密码。表单是 React 受控组件，直接改 `.value` 无效，
+必须走原生 setter + 派发 `input`/`change` 事件；`input[type=email]` / `input[type=password]` + `button[type=submit]`。
+先点掉 cookie 同意条再操作。
+
+**API**：`https://api.getfluence.com`，三个头缺一即 403：
+
+```
+Authorization: Bearer <localStorage.token>
+X-Client: 26c3225d-eb2e-4331-b3a5-c2d01bb8e4c1   ← 前端硬编码的固定值
+X-Locale: en-GB
+```
+
+请求必须在页面上下文里发（CDP `Runtime.evaluate` + `fetch`）；宿主机 curl 只带 `X-Client` 会得到 `401 JWT Token not found`。
+
+| 用途 | 路径 |
+|---|---|
+| 身份/权限/额度 | `GET /api/users/me` → `roles` `state` `settings.tags` |
+| 分类体系 | `GET /api/thematics?itemsPerPage=300` → 222 个，37 个顶级，13 个 `type=refused` |
+| 目录 | `GET /api/offers/catalog?itemsPerPage=100&page=N` → Hydra 分页 |
+| 分类筛选 | `thematics[]=/api/thematics/<id>`（**必须数组形式**，标量报 "should be of type array"） |
+
+**字段是全行业最全的一档**（每条 offer 内嵌 `channel.metrics`）：`domainRating`(Ahrefs) `domainAuthority`(Moz)
+`authorityScore`(Semrush) `trustFlow/citationFlow`(Majestic) `spamScore` `referringDomains` `organicTraffic`
+`monthlyVisits` `nbKeywords` `onGoogleNews` `hasMissingMetrics`；价格 `minMatchingProductPrice.amount + currency`（**USD**）；
+`products[0].format`：`nbWords / nbLinks / typeLinks(dofollow) / lifetime(月) / totalDelay`。
+
+### 三个硬限制（全部踩过）
+
+1. **检索额度（最要命）**：目录检索按次计费。额度耗尽后 `roles` 出现 `ROLE_PERMISSION_CATALOG_SEARCH_LIMITED`，
+   `/api/offers/catalog` 全部 `403 Access Denied.`，页面显示 "Search limit reached"。
+   **额度以响应头 `ratelimit-limit` 为准**（本账号自报 100）；第三方评测说法是免费 10 次、充 €100 加 30 次、首单后无限，
+   与实测不符，别信二手数字。解除靠充值/开户/下单，不是等时间。
+2. **分页上限 10,000**：`totalItems` 恒返回 10000，`page=20000` 报
+   `Page "20000" does not exist. The currentPage must be inferior to "10000"`。真实库存更大，API 只放前 1 万，
+   所以「全库总量」只能当「可检索上限」报。
+3. **503 抖动**：同一 URL 连发会随机 503（响应头照旧），重试即可，别当封号。
+
+### 拒收类目（`thematics[].type == refused`，13 个）
+
+Adult、Gambling、CBD/Cannabis、Tobacco、Alcohol、Trading、Fortune-telling、**Cryptocurrencies**、
+Hair Transplant、Cosmetic surgery、Personalities、Politics、E-Cigarette。
+
+→ **crypto / trading / gambling 在 Getfluence 上根本买不到**，接单前先问清行业，能省一整轮。
 
 ---
 
