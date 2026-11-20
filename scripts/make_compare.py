@@ -3,8 +3,8 @@
 """把另一个平台的 profile 合并成看板的"跨平台对比"项。
 
 用法:
-    python make_compare.py linkhouse_profile.json adsy_profile.json -o merged.json
-    python make_compare.py main.json other.json -o merged.json --note "Adsy 为已核验英语口径"
+    python make_compare.py platform_a.json platform_b.json -o merged.json
+    python make_compare.py main.json other.json -o merged.json --label "Platform B" --note "B 为已核验+英语口径"
     python make_compare.py main.json a.json b.json c.json -o merged.json   # 支持多平台
 
 前提：每个平台都先用 analyze.py 各自跑出 profile.json（同一套字段口径）。
@@ -19,11 +19,12 @@ def to_compare(prof, label=None, note=None):
     plat = prof.get("platform") or {}
     ov = prof.get("overall") or {}
     coll = prof.get("collection") or {}
+    en_share = (ov.get("language") or {}).get("english_share")
+    total = plat.get("supply_total")
     item = {
         "name": label or plat.get("name") or "对比平台",
-        "supply_total": plat.get("supply_total"),
-        "supply_english": (ov.get("language") or {}).get("english_share") and plat.get("supply_total")
-                          and round(plat["supply_total"] * ov["language"]["english_share"] / 100) or None,
+        "supply_total": total,
+        "supply_english": round(total * en_share / 100) if (total and en_share is not None) else None,
         "supply_note": plat.get("supply_note") or "",
         "price": ov.get("price") or {},
         "dr": ov.get("dr") or {},
@@ -65,6 +66,13 @@ def main():
         )
         if not item["price"] and not item["dr"]:
             print(f"[warn] {path} 的 overall 里没有 price/dr，对比区会几乎是空的", file=sys.stderr)
+        base_conds = [c.get("cond") for c in ((base.get("overall") or {}).get("cross") or [])]
+        item_conds = [c.get("cond") for c in (item["cross"] or [])]
+        if base_conds and item_conds and base_conds != item_conds:
+            print(f"[warn] {path} 的 cross 条件与基准平台不一致（币种或 --bands 不同），"
+                  f"看板只对齐 cond 文本完全相同的行", file=sys.stderr)
+        if (prof.get("platform") or {}).get("currency", "$") != (base.get("platform") or {}).get("currency", "$"):
+            print(f"[warn] {path} 的币种与基准平台不同，价格对比无意义，先统一币种", file=sys.stderr)
         base["compare"].append(item)
         print(f"+ {item['name']}  总量 {item['supply_total']}  "
               f"价格中位 {(item['price'] or {}).get('med')}  DR 中位 {(item['dr'] or {}).get('med')}")

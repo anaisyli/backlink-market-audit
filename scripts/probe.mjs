@@ -7,32 +7,44 @@
  *       这一步是"任意平台都能调查"的关键——不用猜接口，让它自己招。
  *
  * 用法:
- *   node probe.mjs --url "https://app.linkhouse.co/panel/advertiser/market"
- *   node probe.mjs --url "..." --profile "C:/Users/EDY/.workbuddy/chrome-profile-linkhouse"
+ *   node probe.mjs --url "https://app.example.com/market"
+ *   node probe.mjs --url "..." --profile "<专用 Chrome 用户目录>"        # 先关掉用该目录打开的 Chrome
+ *   node probe.mjs --url "..." --attach 9222                              # 复用已开着、带调试端口的 Chrome
  *   node probe.mjs --url "..." --click "button.next" --wait 12000
  *
  * 参数:
  *   --url       必填，要打开的页面
- *   --profile   可选，Chrome 用户数据目录（带登录态就填已有 profile，能免登录）
- *   --port      CDP 端口，默认 9333
+ *   --profile   可选，Chrome 用户数据目录（带登录态就填已有目录，能免登录）。
+ *               同一个目录同时只能被一个 Chrome 进程占用：登录窗口还开着时请改用 --attach。
+ *   --attach    可选，连接已在运行的 Chrome 调试端口（如 9222），不启动/不关闭浏览器
+ *   --port      自己启动 Chrome 时使用的 CDP 端口，默认 9333
+ *   --headed    自己启动 Chrome 时不用无头模式（方便看页面、处理登录）
  *   --wait      导航后等待毫秒数，默认 9000（SPA 慢的话加长）
  *   --click     可选，导航后先点某个元素再等（CSS 选择器）
+ *   --out       结果文件，默认 ./probe-result.json
  *   --json      只输出 JSON（给脚本用）
+ *
+ * 环境变量: CHROME_PATH 指定 Chrome/Chromium/Edge 可执行文件
  *
  * 输出：候选接口清单 + 各自的结构摘要 + 建议
  */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const CHROME_CANDIDATES = [
+  process.env.CHROME_PATH,
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome",
-];
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+].filter(Boolean);
 
 // ---------- 参数 ----------
 const argv = process.argv.slice(2);
@@ -44,40 +56,47 @@ const has = (k) => argv.includes("--" + k);
 
 const URL_TARGET = arg("url");
 const PROFILE = arg("profile");
-const PORT = parseInt(arg("port", "9333"), 10);
+const ATTACH = arg("attach") ? parseInt(arg("attach"), 10) : null;
+const PORT = ATTACH || parseInt(arg("port", "9333"), 10);
 const WAIT = parseInt(arg("wait", "9000"), 10);
 const CLICK = arg("click");
+const OUT = resolve(arg("out", "probe-result.json"));
 const JSON_ONLY = has("json");
+const HEADED = has("headed");
 
 if (!URL_TARGET) {
-  console.error("缺少 --url。用法: node probe.mjs --url <平台地址> [--profile <chrome目录>]");
+  console.error("缺少 --url。用法: node probe.mjs --url <平台地址> [--profile <chrome目录> | --attach <端口>]");
+  process.exit(1);
+}
+if (typeof WebSocket === "undefined") {
+  console.error("当前 Node 没有内置 WebSocket，请使用 Node ≥ 22。");
   process.exit(1);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---------- 找 Chrome ----------
-import { existsSync } from "node:fs";
-let chromePath = CHROME_CANDIDATES.find((p) => existsSync(p));
-if (!chromePath) {
-  console.error("找不到 Chrome。请把可执行文件路径加到 CHROME_CANDIDATES。");
-  process.exit(1);
+// ---------- 启动或连接 Chrome ----------
+let child = null;
+if (!ATTACH) {
+  const chromePath = CHROME_CANDIDATES.find((p) => existsSync(p));
+  if (!chromePath) {
+    console.error("找不到 Chrome/Edge。请设置环境变量 CHROME_PATH 指向可执行文件。");
+    process.exit(1);
+  }
+  const userDir = PROFILE || mkdtempSync(join(tmpdir(), "probe-"));
+  const args = [
+    `--remote-debugging-port=${PORT}`,
+    "--remote-allow-origins=*",
+    `--user-data-dir=${userDir}`,
+    ...(HEADED ? [] : ["--headless=new", "--disable-gpu"]),
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "about:blank",
+  ];
+  child = spawn(chromePath, args, { stdio: "ignore", detached: false });
 }
-
-// ---------- 启动 ----------
-const userDir = PROFILE || mkdtempSync(join(tmpdir(), "probe-"));
-const args = [
-  `--remote-debugging-port=${PORT}`,
-  "--remote-allow-origins=*",
-  `--user-data-dir=${userDir}`,
-  "--headless=new",
-  "--disable-gpu",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-background-networking",
-  "about:blank",
-];
-const child = spawn(chromePath, args, { stdio: "ignore", detached: false });
+const shutdown = () => { try { child && child.kill(); } catch { /* 忽略 */ } };
 
 let wsUrl = null;
 for (let i = 0; i < 40; i++) {
@@ -89,8 +108,10 @@ for (let i = 0; i < 40; i++) {
   } catch { /* 还没起来 */ }
 }
 if (!wsUrl) {
-  console.error("Chrome 调试端口没起来。可能已有实例占用了该端口，换个 --port 试试。");
-  child.kill();
+  console.error(ATTACH
+    ? `连不上 127.0.0.1:${PORT}。确认 Chrome 是用 --remote-debugging-port=${PORT} 启动的。`
+    : "Chrome 调试端口没起来。常见原因：该 --profile 目录已被另一个 Chrome 占用（关掉它或改用 --attach），或端口被占用（换 --port）。");
+  shutdown();
   process.exit(1);
 }
 
@@ -295,7 +316,9 @@ try {
   injected = JSON.parse(r.result.value || "[]");
 } catch { /* 忽略 */ }
 
-child.kill();
+await send("Target.closeTarget", { targetId }).catch(() => {});
+try { ws.close(); } catch { /* 忽略 */ }
+shutdown();
 
 // ---------- 输出 ----------
 if (JSON_ONLY) {
@@ -355,6 +378,6 @@ if (!results.length) {
   }
 }
 
-writeFileSync(join(process.cwd(), "probe-result.json"), JSON.stringify({ page: URL_TARGET, candidates: results }, null, 2));
-console.log(`\n完整结果已写入 probe-result.json`);
+writeFileSync(OUT, JSON.stringify({ page: URL_TARGET, candidates: results, seenRequests: injected }, null, 2));
+console.log(`\n完整结果已写入 ${OUT}（含响应样例，可能带账号数据，勿放进交付/发布目录）`);
 process.exit(0);

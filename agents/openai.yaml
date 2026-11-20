@@ -1,0 +1,4 @@
+interface:
+  display_name: "外链市场调查"
+  short_description: "Audit backlink marketplaces into an interactive HTML dashboard and optional Excel report"
+  default_prompt: "Use $backlink-market-audit to investigate this backlink marketplace and build a decision dashboard."

@@ -130,6 +130,12 @@ footer{color:var(--ink3);font-size:11.5px;text-align:center;padding-top:8px}
   <div class="cmpGrid" id="cmpGrid"></div>
 </section>
 
+<section id="mktSec" style="display:none">
+  <div class="h2row"><div><h2>同样预算能买到什么 · 池子是不是你的市场</h2></div><div class="sub" id="mktNote"></div></div>
+  <div class="desc">左：价格 × 质量交叉条件在全平台去重样本中的占比，直接回答「这个预算能买到什么质量」。右：语种与国家结构，判断这个池子是否覆盖你的目标市场。</div>
+  <div class="cmpGrid" id="mktGrid"></div>
+</section>
+
 <section>
   <div class="h2row"><div><h2>设置你的取舍</h2></div></div>
   <div class="desc">三个滑杆决定「供给量 / 质量 / 价格」的相对重要性，下方排名、散点颜色与榜单会实时重算。想要量大就加供给，想要权威就加质量，预算紧就把价格权重拉高。</div>
@@ -171,6 +177,7 @@ footer{color:var(--ink3);font-size:11.5px;text-align:center;padding-top:8px}
   <div class="boards" id="boards"></div>
 </section>
 
+
 <section>
   <div class="h2row"><div><h2>口径与限制</h2></div></div>
   <div class="caveats" id="caveats"></div>
@@ -196,6 +203,12 @@ function money(v){
   return CUR + (v>=1000 ? nf(Math.round(v)) : nf(v, v<10?2:0));
 }
 function pct(v){ return (v==null||isNaN(v)) ? "—" : nf(v,1)+"%"; }
+/* 采集来的分类名/备注都是外部数据，进 innerHTML 前必须转义 */
+function esc(v){
+  return String(v==null?"":v).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
 function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
 function norm(val, lo, hi){
   if(val==null||isNaN(val)) return 0;
@@ -220,8 +233,8 @@ function renderKpis(){
   if(o.verified_share!=null) k.push(["平台核验占比", pct(o.verified_share), "越小说明「已核验」筛选越苛刻"]);
   if(o.dofollow_share!=null) k.push(["dofollow 报价占比", pct(o.dofollow_share), "含 dofollow 选项的站点"]);
   document.getElementById("kpis").innerHTML = k.map(function(x){
-    return '<div class="kpi"><div class="t">'+x[0]+'</div><div class="n'+(String(x[1]).length>7?" sm":"")+'">'+x[1]+
-      '</div>'+(x[2]?'<div class="s">'+x[2]+'</div>':'')+'</div>';
+    return '<div class="kpi"><div class="t">'+esc(x[0])+'</div><div class="n'+(String(x[1]).length>7?" sm":"")+'">'+esc(x[1])+
+      '</div>'+(x[2]?'<div class="s">'+esc(x[2])+'</div>':'')+'</div>';
   }).join("");
 
   document.getElementById("title").textContent = ((D.platform&&D.platform.name)||"目标平台") + " 外链市场调查";
@@ -234,9 +247,9 @@ function renderKpis(){
 
   const cav = (col.caveats||[]).slice();
   if(!cav.length) cav.push("未声明口径限制。");
-  document.getElementById("caveats").innerHTML = cav.map(function(c){return "· "+c;}).join("<br>");
+  document.getElementById("caveats").innerHTML = cav.map(function(c){return "· "+esc(c);}).join("<br>");
   document.getElementById("foot").textContent =
-    "生成于 " + new Date().toLocaleString("zh-CN") +
+    "采集于 " + ((D.collection&&D.collection.date)||"—") +
     " · 数据来自 " + ((D.platform&&D.platform.name)||"该平台") + " 账户可见范围";
 }
 
@@ -296,12 +309,12 @@ function drawScatter(ordered){
 
   let h = "";
   /* 网格 */
-  [0,25,50,75,100].forEach(function(t){
+  [0,10,20,30,40,50,60,70,80,90,100].forEach(function(t){
     if(t<y0||t>y1) return;
     h += '<line class="axline" x1="'+m.l+'" y1="'+Y(t)+'" x2="'+(W-m.r)+'" y2="'+Y(t)+'"/>';
     h += '<text class="axtxt" x="'+(m.l-9)+'" y="'+(Y(t)+4)+'" text-anchor="end">'+t+'</text>';
   });
-  var ticks = [10,30,100,300,1000,3000];
+  var ticks = [5,10,20,30,50,70,100,150,200,300,500,1000,2000,3000,5000];
   ticks.forEach(function(t){
     if(Math.log10(t)<x0||Math.log10(t)>x1) return;
     h += '<line class="axline" x1="'+X(t)+'" y1="'+m.t+'" x2="'+X(t)+'" y2="'+(m.t+ih)+'"/>';
@@ -322,7 +335,7 @@ function drawScatter(ordered){
     const tip = s.name + "｜供给 " + nf(s.total) + "｜" + money(s.price.med) + "｜DR " + nf(s.dr.med,1) +
                 "｜DR≥50 " + pct(s.dr.ge50);
     h += '<circle class="bub" cx="'+X(s.price.med).toFixed(1)+'" cy="'+Y(s.dr.med).toFixed(1)+'" r="'+R(s.total).toFixed(1)+
-         '" fill="'+c+'" opacity="'+op+'"><title>'+tip+'</title></circle>';
+         '" fill="'+c+'" opacity="'+op+'"><title>'+esc(tip)+'</title></circle>';
   });
   svg.innerHTML = h;
 }
@@ -358,7 +371,7 @@ function drawPriceBars(ordered){
     if(prev<100) segs += '<i style="width:'+(100-prev).toFixed(2)+'%;background:#eef0f3"></i>';
     const q50 = s.price.le50;
     return '<div class="bar" style="grid-template-columns:178px 1fr 46px 62px">'+
-      '<div class="nm" title="'+s.name+'">'+s.name+'</div>'+
+      '<div class="nm" title="'+esc(s.name)+'">'+esc(s.name)+'</div>'+
       '<div class="tr">'+segs+'</div>'+
       '<div class="vv" style="color:'+(q50>=30?"var(--green)":q50>=15?"var(--ink2)":"var(--ink3)")+';font-weight:'+(q50>=30?"620":"400")+'">'+
         (q50==null?"—":nf(q50,0)+"%")+'</div>'+
@@ -375,7 +388,7 @@ function drawSupplyBars(){
   el.innerHTML = rows.map(function(s){
     const w = (s.total||0)/mx*100;
     const en = s.english!=null ? '<span style="color:var(--ink3);font-size:11px"> 英语 ' + nf(s.english) + '</span>' : "";
-    return '<div class="bar"><div class="nm" title="'+s.name+'">'+s.name+'</div>'+
+    return '<div class="bar"><div class="nm" title="'+esc(s.name)+'">'+esc(s.name)+'</div>'+
       '<div class="tr" style="background:transparent"><i style="width:'+w.toFixed(2)+'%;background:linear-gradient(90deg,#2b6cb0,#6fa8d4);border-radius:3px"></i></div>'+
       '<div class="vv">'+nf(s.total)+'</div></div>';
   }).join("");
@@ -424,7 +437,7 @@ function drawTable(ordered){
     const cls = r._tier==="top" ? "top" : r._tier==="low" ? "low" : "";
     return '<tr class="'+cls+'">' + COLS.map(function(c){
       if(c.k==="_rk") return '<td class="rk">'+r._rk+'</td>';
-      if(c.k==="name") return '<td class="name" title="'+r.name+'">'+r.name+
+      if(c.k==="name") return '<td class="name" title="'+esc(r.name)+'">'+esc(r.name)+
         (r._tier==="top"?' <span class="pill" style="background:var(--greenL);color:var(--green)">优</span>':'')+'</td>';
       if(c.k==="_s") return '<td style="font-weight:620;color:'+(r._tier==="top"?"var(--green)":r._tier==="low"?"var(--red)":"var(--ink)")+'">'+r._s.toFixed(1)+'</td>';
       const v = getv(r, c.k);
@@ -460,7 +473,7 @@ function drawBoards(ordered){
     return '<div class="bd"><div class="h" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
       '<span>'+b[0]+'</span><span style="font-weight:400;font-size:11px;color:var(--ink3)">Top '+b[1].length+'</span></div>' +
       b[1].map(function(r,i){
-        return '<div class="r"><span>'+(i+1)+'. '+r.name+'</span><span>'+b[2](r)+'</span></div>';
+        return '<div class="r"><span>'+(i+1)+'. '+esc(r.name)+'</span><span>'+b[2](r)+'</span></div>';
       }).join("") + '</div>';
   }).join("");
 
@@ -470,7 +483,7 @@ function drawBoards(ordered){
   if(li.length){
     html += '<div class="bd"><div class="h" style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
       '<span>链接插入位最多</span><span style="font-weight:400;font-size:11px;color:var(--ink3)">Top '+li.length+'</span></div>' +
-      li.map(function(r,i){ return '<div class="r"><span>'+(i+1)+'. '+r.name+'</span><span>'+nf(r.fmt.link_insertion)+' 站</span></div>'; }).join("") +
+      li.map(function(r,i){ return '<div class="r"><span>'+(i+1)+'. '+esc(r.name)+'</span><span>'+nf(r.fmt.link_insertion)+' 站</span></div>'; }).join("") +
       '</div>';
   }
   document.getElementById("boards").innerHTML = html;
@@ -518,7 +531,7 @@ function drawCompare(){
   window.CMP_ALL = [self].concat(cmp);
 
   document.getElementById("cmpLegend").innerHTML = CMP_ALL.map(function(p,i){
-    return '<span><i style="background:'+PALETTE[i%PALETTE.length]+'"></i>'+p.name+'</span>';
+    return '<span><i style="background:'+PALETTE[i%PALETTE.length]+'"></i>'+esc(p.name)+'</span>';
   }).join("");
 
   /* 大数字 */
@@ -533,7 +546,7 @@ function drawCompare(){
     if(p.traffic && p.traffic.med!=null) big.push([p.name+" 流量中位", nf(Math.round(p.traffic.med)), ""]);
   });
   document.getElementById("cmpBig").innerHTML = big.map(function(x){
-    return '<div class="b"><div class="t">'+x[0]+'</div><div class="n">'+x[1]+'</div>'+(x[2]?'<div class="s">'+x[2]+'</div>':'')+'</div>';
+    return '<div class="b"><div class="t">'+esc(x[0])+'</div><div class="n">'+esc(x[1])+'</div>'+(x[2]?'<div class="s">'+esc(x[2])+'</div>':'')+'</div>';
   }).join("");
 
   /* 分布 */
@@ -550,7 +563,7 @@ function drawCompare(){
     html += '<div class="cmpBlk"><div class="bt">同样预算能买到什么（价格×质量）</div>' +
       base.cross.map(function(c, idx){
         const vals = CMP_ALL.map(function(p){
-          const cc = p.cross && p.cross[idx];
+          const cc = p.cross && (p.cross.filter(function(x){return x.cond===c.cond;})[0] || null);
           return cc ? cc.share : null;
         });
         const mx = Math.max.apply(null, vals.filter(function(v){return v!=null;}).concat([1]));
@@ -560,7 +573,7 @@ function drawCompare(){
         const nums = vals.map(function(v,i){
           return '<div style="color:'+(v==null?"var(--ink3)":PALETTE[i%PALETTE.length])+'">'+(v==null?"—":pct(v))+'</div>';
         }).join("");
-        return '<div class="cmpB" style="grid-template-columns:104px 1fr 100px"><div class="lb" style="font-size:10.5px;white-space:normal;line-height:1.25">'+c.cond+'</div><div class="bars">'+bars+'</div><div class="num">'+nums+'</div></div>';
+        return '<div class="cmpB" style="grid-template-columns:104px 1fr 100px"><div class="lb" style="font-size:10.5px;white-space:normal;line-height:1.25">'+esc(c.cond)+'</div><div class="bars">'+bars+'</div><div class="num">'+nums+'</div></div>';
       }).join("") + '</div>';
   }
   document.getElementById("cmpGrid").innerHTML = html;
@@ -568,6 +581,35 @@ function drawCompare(){
   const notes = cmp.filter(function(p){return p.note;}).map(function(p){return p.name+"：" + p.note;});
   document.getElementById("cmpDesc").textContent = notes.join(" ｜ ") ||
     "各平台的库存口径、核验机制与抽样方式不同，横向对比前请先看下方「口径与限制」。";
+}
+
+/* ---------- 市场结构：交叉 + 语种 + 国家 ---------- */
+function hbars(title, rows, fmt){
+  if(!rows.length) return "";
+  const mx = Math.max.apply(null, rows.map(function(r){return r[1]||0;}).concat([1]));
+  return '<div class="cmpBlk"><div class="bt">'+esc(title)+'</div>' + rows.map(function(r){
+    return '<div class="cmpRow" style="grid-template-columns:120px 1fr 64px"><div class="lb" title="'+esc(r[0])+'">'+esc(r[0])+'</div>'+
+      '<div class="cmpTrack"><i style="width:'+((r[1]||0)/mx*100).toFixed(1)+'%;background:'+(r[2]||"#2b6cb0")+'"></i></div>'+
+      '<div class="cv">'+fmt(r[1])+'</div></div>';
+  }).join("") + '</div>';
+}
+function drawMarket(){
+  const o = D.overall || {};
+  let html = "";
+  const cross = (o.cross||[]).filter(function(c){return c && c.share!=null;});
+  html += hbars("价格 × 质量交叉（占去重样本）", cross.map(function(c){return [c.cond, c.share, "#2f855a"];}), pct);
+  const lg = o.language || {};
+  html += hbars("语种结构" + (lg.english_share!=null ? "（英语 " + pct(lg.english_share) + "）" : ""),
+    (lg.dist||[]).map(function(d){return [d.code, d.share, "#6b46c1"];}), pct);
+  html += hbars("国家 Top " + ((o.country||[]).length), (o.country||[]).map(function(d){return [d.code, d.count, "#c8873c"];}),
+    function(v){return nf(v);});
+  if(!html) return;
+  document.getElementById("mktGrid").innerHTML = html;
+  document.getElementById("mktSec").style.display = "block";
+  const notes = [];
+  if(lg.coverage!=null) notes.push("语种覆盖 " + pct(lg.coverage*100));
+  if(o.spam && o.spam.med!=null) notes.push("垃圾分中位 " + nf(o.spam.med,1) + "，≥30 占 " + pct(o.spam.ge30));
+  document.getElementById("mktNote").textContent = notes.join(" · ");
 }
 
 /* ---------- 主流程 ---------- */
@@ -580,6 +622,7 @@ function renderAll(){
   document.getElementById("sbar") && drawSupplyBars();
 }
 renderKpis();
+drawMarket();
 drawSupplyBars();
 drawCompare();
 renderAll();

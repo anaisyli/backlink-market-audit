@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import datetime
+from html import escape as html_escape
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_ROOT = os.path.dirname(HERE)
@@ -61,14 +62,19 @@ def lint(profile):
     for path, why in RECOMMENDED.items():
         if path.endswith("[].price.med") or path.endswith("[].dr.med"):
             key = path.split(".")[-2]
-            miss = [s.get("name") for s in segs if not _get(s, key + ".med")]
+            miss = [s.get("name") for s in segs if isinstance(s, dict) and _get(s, key + ".med") is None]
             if miss:
                 warns.append(f"{len(miss)} 个分类缺 `{key}.med`（{', '.join(miss[:3])}…）→ {why}")
         elif _get(profile, path) is None:
             warns.append(f"缺 `{path}` → {why}")
 
+    if not (_get(profile, "collection.caveats") or []):
+        warns.append("`collection.caveats` 为空 → 口径区会显示「未声明口径限制」，报告不可直接交付")
+
     # 百分比字段越界检查
     for s in segs:
+        if not isinstance(s, dict):
+            continue
         for grp in ("price", "dr", "traffic"):
             g = s.get(grp) or {}
             for k, v in g.items():
@@ -133,6 +139,9 @@ def main():
 
     with open(TEMPLATE, "r", encoding="utf-8") as f:
         html = f.read()
+    if "{{DATA_JSON}}" not in html:
+        print(f"[ERROR] 模板缺少占位符 {{{{DATA_JSON}}}}：{TEMPLATE}", file=sys.stderr)
+        return 2
 
     payload = json.dumps(profile, ensure_ascii=False, separators=(",", ":"))
     # 防止数据里的 </script> 提前闭合脚本块
@@ -140,9 +149,9 @@ def main():
     html = html.replace("{{DATA_JSON}}", payload)
 
     # 标题：模板内 <title> 换成平台名
-    name = profile["platform"].get("name") or "外链市场"
+    name = html_escape(str(profile["platform"].get("name") or "外链市场"))
     html = re.sub(r"<title>.*?</title>",
-                  f"<title>{name} 外链市场调查</title>", html, count=1, flags=re.S)
+                  lambda _m: f"<title>{name} 外链市场调查</title>", html, count=1, flags=re.S)
 
     out = os.path.abspath(args.out)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
